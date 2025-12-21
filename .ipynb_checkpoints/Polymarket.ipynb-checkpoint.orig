@@ -2,9 +2,21 @@
  "cells": [
   {
    "cell_type": "code",
+<<<<<<< Updated upstream
    "execution_count": 6,
    "id": "093186e1-4a91-4afc-ab16-7c8ef674c640",
    "metadata": {},
+=======
+   "execution_count": 1,
+   "id": "70e4ef30-a981-4c73-abde-213951675c4a",
+   "metadata": {
+    "editable": true,
+    "slideshow": {
+     "slide_type": ""
+    },
+    "tags": []
+   },
+>>>>>>> Stashed changes
    "outputs": [
     {
      "name": "stdout",
@@ -647,41 +659,11 @@
   },
   {
    "cell_type": "code",
-   "execution_count": 1,
-   "id": "70e4ef30-a981-4c73-abde-213951675c4a",
-   "metadata": {
-    "editable": true,
-    "slideshow": {
-     "slide_type": ""
-    },
-    "tags": []
-   },
-   "outputs": [
-    {
-     "name": "stdout",
-     "output_type": "stream",
-     "text": [
-      "/Users/ryanjain\n"
-     ]
-    }
-   ],
-   "source": [
-    "!pwd"
-   ]
-  },
-  {
-   "cell_type": "code",
    "execution_count": null,
+<<<<<<< Updated upstream
    "id": "37a12d36-1d76-4833-ba75-87fb154ad6b8",
    "metadata": {},
-   "outputs": [],
-   "source": [
-    "ws.c"
-   ]
-  },
-  {
-   "cell_type": "code",
-   "execution_count": null,
+=======
    "id": "630e5bbb-44d1-4eaa-bf37-d65fd4f77c41",
    "metadata": {
     "editable": true,
@@ -690,8 +672,11 @@
     },
     "tags": []
    },
+>>>>>>> Stashed changes
    "outputs": [],
-   "source": []
+   "source": [
+    "ws.c"
+   ]
   }
  ],
  "metadata": {
