@@ -2,201 +2,295 @@ import json
 import threading
 import pandas as pd
 import time
+import signal
+import sys
+import atexit
+import requests
 from datetime import datetime
 from pathlib import Path
 from websocket import WebSocketApp
 
 # ============ CONFIGURATION ============
-# Get these from the Gamma API or the URL slug
-TOKEN_ID_UP = "85405398028343230478158472254701676422933984902308782252271836354625808261213"      # REPLACE WITH ACTUAL TOKEN ID
-TOKEN_ID_DOWN = "102403134145711160308610936179070371492516617389179678344710406630927087880128"    # REPLACE WITH ACTUAL TOKEN ID
-MARKET_SLUG = "btc-updown-15m-1766363400"
-MARKET_END_UNIX = 1766363400 + 900
+TOKEN_ID_UP = "53398642787529207982308002576599779120889686331928151735250039510047392627488"
+TOKEN_ID_DOWN = "29822429672172354396578021183134197938504920225831222333842740602723777494319"
+MARKET_SLUG = "btc-updown-15m-1766692800"
 
-# File Storage
-DATA_DIR = Path("polymarket_data")
+DATA_DIR = Path("DataCollection/OrderbookData")
 DATA_DIR.mkdir(exist_ok=True)
-FILENAME = DATA_DIR / "orderbook_snapshots.parquet"
+FILENAME = DATA_DIR / "1766692800-orderbook.parquet"
+
+# Sampling and save settings
+SAMPLE_INTERVAL = 0.1  # seconds between samples
+SAVE_INTERVAL = 60     # seconds between saves
+MAX_BUFFER_SIZE = 1000 # force save after this many records
+
+# REST API endpoint (confirmed to return accurate prices)
+CLOB_API = "https://clob.polymarket.com"
 
 # ============ SHARED STATE ============
-books = {
-    TOKEN_ID_UP: {"bids": [], "asks": []},
-    TOKEN_ID_DOWN: {"bids": [], "asks": []},
+prices = {
+    TOKEN_ID_UP: {"best_bid": None, "best_ask": None, "last_trade": None},
+    TOKEN_ID_DOWN: {"best_bid": None, "best_ask": None, "last_trade": None},
 }
-books_lock = threading.Lock()
-
-# Buffer for saving data
+data_lock = threading.Lock()
 snapshot_buffer = []
 last_save_time = time.time()
+running = True
+ws_instance = None
 
-# ============ WEBSOCKET: Live Orderbook ============
+# ============ REST API PRICE FETCHER ============
+def fetch_price(token_id, side):
+    """Fetch price from REST API (confirmed accurate)."""
+    try:
+        resp = requests.get(
+            f"{CLOB_API}/price",
+            params={"token_id": token_id, "side": side},
+            timeout=5
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return float(data.get("price", 0))
+    except:
+        pass
+    return None
+
+def price_poller():
+    """Poll REST API for accurate prices."""
+    while running:
+        try:
+            for token_id in [TOKEN_ID_UP, TOKEN_ID_DOWN]:
+                bid = fetch_price(token_id, "BUY")   # Best bid = what buyers offer (you receive when selling)
+                ask = fetch_price(token_id, "SELL")  # Best ask = what sellers want (you pay when buying)
+                
+                if bid is not None and ask is not None:
+                    with data_lock:
+                        prices[token_id]["best_bid"] = bid
+                        prices[token_id]["best_ask"] = ask
+            
+            time.sleep(0.5)  # Poll every 500ms
+        except:
+            time.sleep(1)
+
+# ============ DATA PERSISTENCE ============
+def save_buffer_to_disk(final=False):
+    """Save buffered snapshots to parquet file."""
+    global snapshot_buffer, last_save_time
+    
+    if not snapshot_buffer:
+        return
+    
+    try:
+        new_df = pd.DataFrame(snapshot_buffer)
+        
+        if FILENAME.exists():
+            existing_df = pd.read_parquet(FILENAME)
+            final_df = pd.concat([existing_df, new_df], ignore_index=True)
+        else:
+            final_df = new_df
+        
+        final_df.to_parquet(FILENAME, index=False)
+        
+        count = len(snapshot_buffer)
+        snapshot_buffer = []
+        last_save_time = time.time()
+        
+        if final:
+            print(f"[FINAL SAVE] {count} records saved to {FILENAME}")
+        
+    except Exception as e:
+        print(f"[SAVE ERROR] {e}")
+
+def graceful_shutdown(*args):
+    """Handle graceful shutdown on signal or exit."""
+    global running, ws_instance
+    
+    running = False
+    
+    if ws_instance:
+        try:
+            ws_instance.close()
+        except:
+            pass
+    
+    save_buffer_to_disk(final=True)
+    
+    total_records = 0
+    if FILENAME.exists():
+        try:
+            df = pd.read_parquet(FILENAME)
+            total_records = len(df)
+        except:
+            pass
+    
+    print(f"[SHUTDOWN] Total records in file: {total_records}")
+    sys.exit(0)
+
+# Register shutdown handlers
+signal.signal(signal.SIGINT, graceful_shutdown)
+signal.signal(signal.SIGTERM, graceful_shutdown)
+atexit.register(lambda: save_buffer_to_disk(final=True))
+
+# ============ WEBSOCKET (for last_trade_price) ============
 def on_open(ws):
-    print("[WS] Connected")
-    # Subscribe to BOTH Up and Down tokens
+    global ws_instance
+    ws_instance = ws
+    
+    print(f"[CONNECTED] Subscribing to market: {MARKET_SLUG}")
+    
     msg = {
-        "assets_ids": [TOKEN_ID_UP, TOKEN_ID_DOWN], 
+        "assets_ids": [TOKEN_ID_UP, TOKEN_ID_DOWN],
         "type": "market"
     }
     ws.send(json.dumps(msg))
+    
+    def ping():
+        while running:
+            try:
+                ws.send("PING")
+                time.sleep(10)
+            except:
+                break
+    threading.Thread(target=ping, daemon=True).start()
 
 def on_message(ws, message):
-    if message == "PONG": return
-    
+    if message == "PONG":
+        return
+
     try:
         data = json.loads(message)
-        # Handle both single events and lists of events
         events = data if isinstance(data, list) else [data]
 
         for event in events:
-            if event.get("event_type") != "book":
-                continue
+            event_type = event.get("event_type")
+            
+            # Capture last trade price from WebSocket (this is accurate)
+            if event_type == "last_trade_price":
+                asset_id = event.get("asset_id")
+                if asset_id in prices:
+                    with data_lock:
+                        prices[asset_id]["last_trade"] = float(event.get("price", 0))
 
-            asset_id = event.get("asset_id")
-            if asset_id not in books:
-                continue
+    except:
+        pass
 
-            # CRITICAL: Polymarket sends snapshots. Overwrite the list.
-            with books_lock:
-                # API sends strings often, keep them as is or cast to float later
-                books[asset_id]["bids"] = event.get("bids") or []
-                books[asset_id]["asks"] = event.get("asks") or []
-                
-    except Exception as e:
-        print(f"[WS ERROR] {e}")
+def on_close(ws, close_status_code, close_msg):
+    print(f"[DISCONNECTED] Code: {close_status_code}")
+    save_buffer_to_disk(final=True)
+
+def on_error(ws, error):
+    pass
 
 def run_websocket():
-    # Loop to auto-reconnect if internet drops
-    while True:
+    while running:
         try:
             ws = WebSocketApp(
                 "wss://ws-subscriptions-clob.polymarket.com/ws/market",
                 on_open=on_open,
-                on_message=on_message
+                on_message=on_message,
+                on_close=on_close,
+                on_error=on_error
             )
             ws.run_forever()
-            print("[WS] Reconnecting in 2s...")
-            time.sleep(2)
-        except Exception as e:
-            print(f"[WS CRASH] {e}")
-            time.sleep(5)
+            
+            if running:
+                save_buffer_to_disk()
+                time.sleep(2)
+        except:
+            if running:
+                time.sleep(5)
 
 # ============ SAMPLER & SAVER ============
-def get_depth_metrics(levels, n=5):
-    """
-    Calculates Weighted Avg Price, Total Size, and Best Price for top N levels.
-    """
-    if not levels:
-        return None, 0.0, 0.0
-    
-    # Polymarket levels are ["price", "size"] strings. Convert to float.
-    # Note: Bids/Asks are pre-sorted by the server (Best is usually first or last).
-    # We assume standard formatting: Bids[0] is best, Asks[0] is best.
-    # If using 'pop', check index. Here we iterate top N.
-    
-    total_size = 0.0
-    weighted_sum = 0.0
-    best_price = float(levels[0]["price"])
-    
-    count = 0
-    for level in levels:
-        p = float(level["price"])
-        s = float(level["size"])
-        weighted_sum += p * s
-        total_size += s
-        count += 1
-        if count >= n:
-            break
-            
-    avg_price = weighted_sum / total_size if total_size > 0 else 0.0
-    return best_price, total_size, avg_price
-
 def sampler_and_saver():
     global snapshot_buffer, last_save_time
-    print("[SAMPLER] Started...")
     
-    while True:
+    print(f"[STARTED] Capturing to {FILENAME}")
+    print(f"[CONFIG] Sample interval: {SAMPLE_INTERVAL}s, Save interval: {SAVE_INTERVAL}s")
+    
+    records_since_last_log = 0
+    last_log_time = time.time()
+
+    while running:
         now_ts = time.time()
-        
-        # 1. SAMPLE THE STATE
-        with books_lock:
-            # Copy state to avoid holding lock during calculations
-            up_bids = list(books[TOKEN_ID_UP]["bids"])
-            up_asks = list(books[TOKEN_ID_UP]["asks"])
-            down_bids = list(books[TOKEN_ID_DOWN]["bids"])
-            down_asks = list(books[TOKEN_ID_DOWN]["asks"])
 
-        # Only record if we have data
-        if up_bids and up_asks:
-            # Calculate Metrics (Up Token)
-            up_bid_px, up_bid_sz, _ = get_depth_metrics(up_bids)
-            up_ask_px, up_ask_sz, _ = get_depth_metrics(up_asks)
-            
-            # Calculate Metrics (Down Token)
-            down_bid_px, down_bid_sz, _ = get_depth_metrics(down_bids)
-            down_ask_px, down_ask_sz, _ = get_depth_metrics(down_asks)
+        with data_lock:
+            up_bid = prices[TOKEN_ID_UP]["best_bid"]
+            up_ask = prices[TOKEN_ID_UP]["best_ask"]
+            up_last = prices[TOKEN_ID_UP]["last_trade"]
+            down_bid = prices[TOKEN_ID_DOWN]["best_bid"]
+            down_ask = prices[TOKEN_ID_DOWN]["best_ask"]
+            down_last = prices[TOKEN_ID_DOWN]["last_trade"]
 
-            # Create Record
+        if up_bid is not None and up_ask is not None:
             record = {
                 "timestamp": datetime.fromtimestamp(now_ts),
                 "unixtime": now_ts,
                 "market_slug": MARKET_SLUG,
-                
-                # Up Token
-                "up_best_bid": up_bid_px,
-                "up_best_ask": up_ask_px,
-                "up_bid_depth_5": up_bid_sz,
-                "up_ask_depth_5": up_ask_sz,
-                "up_spread": up_ask_px - up_bid_px,
-                
-                # Down Token
-                "down_best_bid": down_bid_px,
-                "down_best_ask": down_ask_px,
-                "down_spread": down_ask_px - down_bid_px,
-                
-                # Implied Probability Check (Should sum to ~$1.00)
-                "implied_sum_bid": up_bid_px + down_bid_px,
-                "implied_sum_ask": up_ask_px + down_ask_px
+                "up_best_bid": up_bid,
+                "up_best_ask": up_ask,
+                "up_spread": up_ask - up_bid,
+                "up_last_trade": up_last,
+                "down_best_bid": down_bid,
+                "down_best_ask": down_ask,
+                "down_spread": (down_ask - down_bid) if down_bid and down_ask else None,
+                "down_last_trade": down_last,
+                "implied_sum_bid": up_bid + (down_bid or 0),
+                "implied_sum_ask": up_ask + (down_ask or 0),
             }
             snapshot_buffer.append(record)
+            records_since_last_log += 1
 
-        # 2. SAVE TO DISK (Every 60s or 1000 records)
-        if len(snapshot_buffer) > 0 and (now_ts - last_save_time > 60 or len(snapshot_buffer) >= 1000):
-            print(f"💾 Flushing {len(snapshot_buffer)} orderbook snapshots...")
+        # Periodic save
+        should_save = (
+            len(snapshot_buffer) > 0 and 
+            (now_ts - last_save_time > SAVE_INTERVAL or len(snapshot_buffer) >= MAX_BUFFER_SIZE)
+        )
+        
+        if should_save:
+            save_buffer_to_disk()
+
+        # Status log every 60 seconds
+        if now_ts - last_log_time >= 60:
+            total = 0
+            if FILENAME.exists():
+                try:
+                    df = pd.read_parquet(FILENAME)
+                    total = len(df)
+                except:
+                    pass
             
-            try:
-                new_df = pd.DataFrame(snapshot_buffer)
-                
-                if FILENAME.exists():
-                    existing_df = pd.read_parquet(FILENAME)
-                    final_df = pd.concat([existing_df, new_df], ignore_index=True)
-                else:
-                    final_df = new_df
-                
-                final_df.to_parquet(FILENAME, index=False)
-                print("✅ Saved.")
-                
-                snapshot_buffer = []
-                last_save_time = now_ts
-                
-            except Exception as e:
-                print(f"⚠️ Save Failed: {e}")
+            # Show current prices in status
+            with data_lock:
+                up_b = prices[TOKEN_ID_UP]["best_bid"]
+                up_a = prices[TOKEN_ID_UP]["best_ask"]
+            
+            print(f"[STATUS] +{records_since_last_log} records | Total: {total} | UP bid/ask: {up_b}/{up_a}")
+            records_since_last_log = 0
+            last_log_time = now_ts
 
-        # Sample rate (0.1s = 10Hz)
-        time.sleep(0.1)
+        time.sleep(SAMPLE_INTERVAL)
 
 # ============ EXECUTION ============
 if __name__ == "__main__":
-    # 1. Start WebSocket Thread
+    print("=" * 50)
+    print("Polymarket Orderbook Capturer")
+    print("=" * 50)
+    print(f"Market: {MARKET_SLUG}")
+    print(f"Output: {FILENAME}")
+    print("Press Ctrl+C to stop and savçe")
+    print("=" * 50)
+    
+    # Start REST API price poller
+    t_poller = threading.Thread(target=price_poller, daemon=True)
+    t_poller.start()
+    
+    # Start WebSocket for last_trade_price events
     t_ws = threading.Thread(target=run_websocket, daemon=True)
     t_ws.start()
     
-    # 2. Start Sampler/Saver (Main Thread)
-    # We run this on the main thread so Ctrl+C works nicely
     try:
         sampler_and_saver()
     except KeyboardInterrupt:
-        print("Stopping...")
-        # Save remaining data before exit
-        if snapshot_buffer:
-            print("Saving final data...")
-            pd.DataFrame(snapshot_buffer).to_parquet(FILENAME, index=False)
+        graceful_shutdown()
+    except Exception as e:
+        print(f"[ERROR] {e}")
+        graceful_shutdown()

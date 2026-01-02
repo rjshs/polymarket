@@ -8,22 +8,30 @@ from pathlib import Path
 
 # 1. Configuration
 WS_URL = "wss://ws-live-data.polymarket.com"
-DATA_DIR = Path("polymarket_data")
+DATA_DIR = Path("DataCollection/BitcoinPrices")
 DATA_DIR.mkdir(exist_ok=True)
-FILENAME = DATA_DIR / "bitcoin_prices.parquet"
+FILENAME = DATA_DIR / "1766692800-prices.parquet"
 
 # Subscription (Chainlink Feed)
+# subscribe_message = {
+#   "action": "subscribe",
+#   "subscriptions": [{
+#     "topic": "crypto_prices_chainlink",
+#     "type": "*",
+#     "filters": "{\"symbol\":\"btc/usd\"}"
+#   }]
+# }
 subscribe_message = {
   "action": "subscribe",
   "subscriptions": [{
-    "topic": "crypto_prices_chainlink",
-    "type": "*",
-    "filters": "{\"symbol\":\"btc/usd\"}"
+    "topic": "crypto_prices",
+    "type": "update",
+    "filters": "btcusdt,ethusdt"
   }]
 }
 
 # Watchlist
-MY_WATCHLIST = ["btc/usd"]
+MY_WATCHLIST = ["btcusdt"]
 
 async def run_bot():
     # --- BUFFER SETUP ---

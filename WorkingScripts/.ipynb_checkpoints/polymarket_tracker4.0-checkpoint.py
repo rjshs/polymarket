@@ -8,25 +8,15 @@ import json
 import os
 from pathlib import Path
 
-# ============ CONFIGURATION ============
 # Your Polygonscan API key
-POLYGONSCAN_API_KEY = "4W4KUG6RPKGX2WBPZQXI9WU2XE5H3P2YKJ"
+POLYGONSCAN_API_KEY = "4W4KUG6RPKGX2WBPZQXI9WU2XE5H3P2YKJ"  # Replace with your actual key
 
 # Polymarket's CTF Exchange contract address on Polygon
 CTF_EXCHANGE_ADDRESS = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
 
 # Data storage directory
-DATA_DIR = Path("DataCollection/PositionsData")
+DATA_DIR = Path("polymarket_data")
 DATA_DIR.mkdir(exist_ok=True)
-
-# DEFAULT SETTINGS - Edit these to run without arguments
-DEFAULT_WALLET = "0x6031b6eed1c97e853c6e0f03ad3ce3529351f96d"
-DEFAULT_MARKET = "btc-updown-15m-1766692800"
-DEFAULT_INTERVAL = 0.3  # seconds between updates
-DEFAULT_MONITOR = True  # Enable monitoring by default
-DEFAULT_ACTIVE_ONLY = True  # Filter for active positions only
-OUTPUT_FILENAME = "1766692800-positions"  # Custom filename (without .parquet extension) or None for auto-generated
-# =======================================
 
 
 def extract_market_slug(market_url):
@@ -161,7 +151,7 @@ def get_current_positions(wallet_address, condition_ids=None, market_filter=None
         return []
 
 
-def save_position_snapshot(wallet_address, positions, market_slugs=None, custom_filename=None):
+def save_position_snapshot(wallet_address, positions, market_slugs=None):
     """
     Save a snapshot of positions to a Parquet file with timestamp
     Parquet is best for time-series data - more efficient than CSV, easier than JSON
@@ -201,10 +191,8 @@ def save_position_snapshot(wallet_address, positions, market_slugs=None, custom_
     
     df = pd.DataFrame(records)
     
-    # Create filename based on custom name or wallet and markets
-    if custom_filename:
-        filename = f"{custom_filename}.parquet"
-    elif market_slugs:
+    # Create filename based on wallet and markets
+    if market_slugs:
         markets_str = "_".join([slug[:20] for slug in market_slugs[:2]])  # Use first 2 slugs
         filename = f"positions_{wallet_address[:8]}_{markets_str}.parquet"
     else:
@@ -259,24 +247,26 @@ def display_positions(positions, market_info=None):
             info = market_info[pos['conditionId']]
             print(f"Question: {info['question']}")
         
-        # print(f"Outcome: {pos['outcome']}")
-        # print(f"Shares: {pos['size']:.2f}")
-        # print(f"Avg Price: ${pos['avgPrice']:.4f}")
-        # print(f"Current Price: ${pos['curPrice']:.4f}")
-        # print(f"Current Value: ${pos['currentValue']:.2f}")
-        # print(f"P&L: ${pos['cashPnl']:.2f} ({pos['percentPnl']:.2f}%)")
-        # print(f"Condition ID: {pos['conditionId']}")
-        # print("-"*80)
+        print(f"Outcome: {pos['outcome']}")
+        print(f"Shares: {pos['size']:.2f}")
+        print(f"Avg Price: ${pos['avgPrice']:.4f}")
+        print(f"Current Price: ${pos['curPrice']:.4f}")
+        print(f"Current Value: ${pos['currentValue']:.2f}")
+        print(f"P&L: ${pos['cashPnl']:.2f} ({pos['percentPnl']:.2f}%)")
+        print(f"Condition ID: {pos['conditionId']}")
+        print("-"*80)
 
 
 def monitor_wallet(wallet_address, interval=60, condition_ids=None, market_info=None, 
-                   market_slugs=None, save_data=True, market_filter=None, custom_filename=None):
+                   market_slugs=None, save_data=True, market_filter=None):
     """
     Continuously monitor a wallet's positions and save data
     """
     print(f"Starting real-time monitoring for {wallet_address}")
+    # ... (Keep your existing print statements here) ...
     print(f"Updating every {interval} seconds. Press Ctrl+C to stop.\n")
     
+    # CHANGE 1: Create a memory buffer and a timer
     position_buffer = [] 
     last_save_time = time.time()
     
@@ -285,9 +275,12 @@ def monitor_wallet(wallet_address, interval=60, condition_ids=None, market_info=
             positions = get_current_positions(wallet_address, condition_ids, market_filter)
             display_positions(positions, market_info)
             
+            # CHANGE 2: Process data immediately into RAM, but DO NOT save to disk yet.
+            # We must do this here to capture the exact timestamp of the fetch.
             if save_data and positions:
                 current_ts = datetime.now()
                 for pos in positions:
+                    # We manually create the record dict here to ensure accurate timestamps
                     record = {
                         'timestamp': current_ts,
                         'wallet_address': wallet_address,
@@ -312,22 +305,24 @@ def monitor_wallet(wallet_address, interval=60, condition_ids=None, market_info=
                     }
                     position_buffer.append(record)
 
+            # CHANGE 3: Flush to disk only once every 60 seconds (or on high buffer size)
+            # This turns 300 disk writes into 1 disk write.
             if save_data and (time.time() - last_save_time > 60 or len(position_buffer) > 5000):
                 if position_buffer:
                     print(f"\n💾 Flushing {len(position_buffer)} records to disk...")
                     
+                    # Create DataFrame from buffer
                     new_df = pd.DataFrame(position_buffer)
                     
-                    # Generate filename
-                    if custom_filename:
-                        filename = f"{custom_filename}.parquet"
-                    elif market_slugs:
+                    # Generate filename (same logic as before)
+                    if market_slugs:
                         markets_str = "_".join([slug[:20] for slug in market_slugs[:2]])
                         filename = f"positions_{wallet_address[:8]}_{markets_str}.parquet"
                     else:
                         filename = f"positions_{wallet_address[:8]}_all.parquet"
                     filepath = DATA_DIR / filename
 
+                    # Read existing -> Concat -> Write (The expensive part, now done rarely)
                     if filepath.exists():
                         existing_df = pd.read_parquet(filepath)
                         final_df = pd.concat([existing_df, new_df], ignore_index=True)
@@ -336,22 +331,24 @@ def monitor_wallet(wallet_address, interval=60, condition_ids=None, market_info=
                         
                     final_df.to_parquet(filepath, index=False)
                     
+                    # Clear buffer and reset timer
                     position_buffer = []
                     last_save_time = time.time()
                     print(f"✅ Data saved. Total records in file: {len(final_df)}")
             
+            # print(f"\nLast updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            # print(f"Next update in {interval} seconds...")
             time.sleep(interval)
 
     except KeyboardInterrupt:
         print("\n\nMonitoring stopped by user")
         
+        # CHANGE 4: Emergency flush on exit so you don't lose the last minute of data
         if save_data and position_buffer:
             print(f"💾 Saving remaining {len(position_buffer)} records...")
             new_df = pd.DataFrame(position_buffer)
             
-            if custom_filename:
-                filename = f"{custom_filename}.parquet"
-            elif market_slugs:
+            if market_slugs:
                 markets_str = "_".join([slug[:20] for slug in market_slugs[:2]])
                 filename = f"positions_{wallet_address[:8]}_{markets_str}.parquet"
             else:
@@ -370,11 +367,9 @@ def monitor_wallet(wallet_address, interval=60, condition_ids=None, market_info=
         if save_data:
             print(f"\nData saved to: {DATA_DIR}")
 
-
 def main(wallet_addresses=None, market_urls=None, skip_leaderboard=False, top_volume=False, 
          top_profit=False, plot=True, latest_price_mode=False, monitor=False,
-         interval=60, save_data=True, load_file=None, active_only=False, future_only=False,
-         custom_filename=None):
+         interval=60, save_data=True, load_file=None, active_only=False, future_only=False):
     """
     Main function to analyze Polymarket user positions
     """
@@ -444,7 +439,7 @@ def main(wallet_addresses=None, market_urls=None, skip_leaderboard=False, top_vo
         if monitor:
             # Continuous monitoring mode
             monitor_wallet(wallet, interval, condition_ids, market_info, 
-                         market_slugs, save_data, market_filter, custom_filename)
+                         market_slugs, save_data, market_filter)
         else:
             # One-time check
             print("Running one-time position check. Use --monitor for continuous updates.\n")
@@ -453,7 +448,7 @@ def main(wallet_addresses=None, market_urls=None, skip_leaderboard=False, top_vo
             
             # Save snapshot if requested
             if save_data and positions:
-                filepath = save_position_snapshot(wallet, positions, market_slugs, custom_filename)
+                filepath = save_position_snapshot(wallet, positions, market_slugs)
                 print(f"\nData saved to: {filepath}")
             
             # Optionally fetch blockchain transaction history
@@ -473,11 +468,14 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run with defaults (just python script.py)
-  python polymarket_tracker.py
-  
   # Monitor specific Bitcoin markets
   python polymarket_tracker.py --wallets 0x123... --markets https://polymarket.com/event/bitcoin-up-or-down-december-21 --monitor --interval 30
+  
+  # Monitor multiple markets
+  python polymarket_tracker.py --wallets 0x123... --markets bitcoin-up-or-down eth-price-prediction --monitor
+  
+  # One-time check with data save
+  python polymarket_tracker.py --wallets 0x123... --markets bitcoin-up-or-down
   
   # Load and analyze saved data
   python polymarket_tracker.py --load polymarket_data/positions_0x6031b6e_bitcoin-up-or-down.parquet
@@ -487,32 +485,28 @@ Examples:
     parser.add_argument(
         '--wallets',
         nargs='+',
-        default=[DEFAULT_WALLET] if DEFAULT_WALLET else None,
-        help=f'List of wallet addresses to track (default: {DEFAULT_WALLET})'
+        help='List of wallet addresses to track'
     )
     parser.add_argument(
         '--markets',
         nargs='+',
-        default=[DEFAULT_MARKET] if DEFAULT_MARKET else None,
-        help=f'List of market URLs or slugs to filter (default: {DEFAULT_MARKET})'
+        help='List of market URLs or slugs to filter (e.g., https://polymarket.com/event/bitcoin-up-or-down or just bitcoin-up-or-down)'
     )
     parser.add_argument(
         '--monitor',
         action='store_true',
-        default=DEFAULT_MONITOR,
-        help=f'Enable continuous monitoring mode (default: {DEFAULT_MONITOR})'
+        help='Enable continuous monitoring mode'
     )
     parser.add_argument(
         '--interval',
         type=float,
-        default=DEFAULT_INTERVAL,
-        help=f'Update interval in seconds for monitor mode (default: {DEFAULT_INTERVAL})'
+        default=60,
+        help='Update interval in seconds for monitor mode (default: 60)'
     )
     parser.add_argument(
         '--active-only',
         action='store_true',
-        default=DEFAULT_ACTIVE_ONLY,
-        help=f'Only show active positions (default: {DEFAULT_ACTIVE_ONLY})'
+        help='Only show active positions (exclude expired/redeemed markets). Useful for 15-min markets.'
     )
     parser.add_argument(
         '--future-only',
@@ -555,8 +549,7 @@ Examples:
         help='Only retrieve the latest prices, no plotting'
     )
     
-    # Use parse_known_args to ignore Jupyter kernel arguments
-    args, unknown = parser.parse_known_args()
+    args = parser.parse_args()
     
     main(
         wallet_addresses=args.wallets,
@@ -571,6 +564,5 @@ Examples:
         save_data=not args.no_save,
         load_file=args.load,
         active_only=args.active_only,
-        future_only=args.future_only,
-        custom_filename=OUTPUT_FILENAME
+        future_only=args.future_only
     )

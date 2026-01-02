@@ -6,13 +6,24 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
 
+# ============ CONFIGURATION ============
 # Data storage directory
-DATA_DIR = Path("polymarket_data")
-DATA_DIR.mkdir(exist_ok=True)
+DATA_DIR = Path("DataCollection/BotTrades")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# DEFAULT SETTINGS - Edit these to run without arguments
+DEFAULT_WALLET = "0x6031b6eed1c97e853c6e0f03ad3ce3529351f96d"  # REQUIRED: Wallet address to track
+DEFAULT_MARKETS = None  # List of market slugs like ["bitcoin-up-or-down-december-21"] or None for all markets
+DEFAULT_START = 1766692800  # Unix timestamp (seconds) for start time or None. Example: 1734775200
+DEFAULT_END = 1766693700  # Unix timestamp (seconds) for end time or None. Example: 1734789600
+DEFAULT_MAX_PAGES = None  # Maximum pages to fetch or None for unlimited
+DEFAULT_SAVE = True  # Save trades to parquet file
+OUTPUT_FILENAME = "1766692800-trades"  # Custom filename (without .parquet) or None for auto-generated
 
 # API Configuration
 BASE_URL = "https://data-api.polymarket.com"
 GAMMA_URL = "https://gamma-api.polymarket.com"
+# =======================================
 
 
 def extract_market_slug(market_url):
@@ -268,7 +279,7 @@ def trades_to_dataframe(trades, market_slugs=None):
     return df
 
 
-def save_trades_to_parquet(df, wallet_address, market_slugs=None, start=None, end=None):
+def save_trades_to_parquet(df, wallet_address, market_slugs=None, start=None, end=None, custom_filename=None):
     """
     Save trades DataFrame to Parquet file
     """
@@ -276,22 +287,27 @@ def save_trades_to_parquet(df, wallet_address, market_slugs=None, start=None, en
         print("No trades to save")
         return None
     
-    # Create descriptive filename
-    filename_parts = [f"trades_{wallet_address[:8]}"]
+    # Use custom filename if provided
+    if custom_filename:
+        filename = f"{custom_filename}.parquet"
+    else:
+        # Create descriptive filename
+        filename_parts = [f"trades_{wallet_address[:8]}"]
+        
+        if market_slugs:
+            # Use first market slug (truncated)
+            slug_str = market_slugs[0][:30]
+            filename_parts.append(slug_str)
+        
+        if start and end:
+            filename_parts.append(f"{start}_{end}")
+        elif start:
+            filename_parts.append(f"from_{start}")
+        elif end:
+            filename_parts.append(f"until_{end}")
+        
+        filename = "_".join(filename_parts) + ".parquet"
     
-    if market_slugs:
-        # Use first market slug (truncated)
-        slug_str = market_slugs[0][:30]
-        filename_parts.append(slug_str)
-    
-    if start and end:
-        filename_parts.append(f"{start}_{end}")
-    elif start:
-        filename_parts.append(f"from_{start}")
-    elif end:
-        filename_parts.append(f"until_{end}")
-    
-    filename = "_".join(filename_parts) + ".parquet"
     filepath = DATA_DIR / filename
     
     df.to_parquet(filepath, index=False)
@@ -346,17 +362,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Run with defaults (just python script.py)
+  python polymarket_historical_trades.py
+  
   # Fetch all trades for a wallet in a time range (using unix timestamps)
   python polymarket_historical_trades.py --wallet 0x123... --start 1734775200 --end 1734789600
   
   # Fetch trades for specific markets
   python polymarket_historical_trades.py --wallet 0x123... --markets bitcoin-up-or-down eth-price-prediction
-  
-  # Fetch trades for a specific market with time filter
-  python polymarket_historical_trades.py --wallet 0x123... --markets bitcoin-up-or-down --start 1734775200
-  
-  # Fetch recent trades (no time filter)
-  python polymarket_historical_trades.py --wallet 0x123...
   
 Unix timestamp converter: https://www.unixtimestamp.com/
         """
@@ -364,32 +377,37 @@ Unix timestamp converter: https://www.unixtimestamp.com/
     
     parser.add_argument(
         '--wallet',
-        required=True,
-        help='Wallet address to fetch trades for'
+        default=DEFAULT_WALLET,
+        help=f'Wallet address to fetch trades for (default: {DEFAULT_WALLET})'
     )
     parser.add_argument(
         '--markets',
         nargs='+',
-        help='List of market slugs to filter (e.g., bitcoin-up-or-down-december-21)'
+        default=DEFAULT_MARKETS,
+        help=f'List of market slugs to filter (default: {DEFAULT_MARKETS})'
     )
     parser.add_argument(
         '--start',
         type=int,
-        help='Start unix timestamp in seconds (e.g., 1734775200)'
+        default=DEFAULT_START,
+        help=f'Start unix timestamp in seconds (default: {DEFAULT_START})'
     )
     parser.add_argument(
         '--end',
         type=int,
-        help='End unix timestamp in seconds (e.g., 1734789600)'
+        default=DEFAULT_END,
+        help=f'End unix timestamp in seconds (default: {DEFAULT_END})'
     )
     parser.add_argument(
         '--max-pages',
         type=int,
-        help='Maximum number of pages to fetch (default: unlimited)'
+        default=DEFAULT_MAX_PAGES,
+        help=f'Maximum number of pages to fetch (default: {DEFAULT_MAX_PAGES})'
     )
     parser.add_argument(
         '--no-save',
         action='store_true',
+        default=not DEFAULT_SAVE,
         help='Do not save trades to file'
     )
     parser.add_argument(
@@ -398,7 +416,8 @@ Unix timestamp converter: https://www.unixtimestamp.com/
         help='Load and display trades from existing Parquet file'
     )
     
-    args = parser.parse_args()
+    # Use parse_known_args to ignore Jupyter kernel arguments
+    args, unknown = parser.parse_known_args()
     
     # Handle loading existing data
     if args.load:
@@ -429,7 +448,7 @@ Unix timestamp converter: https://www.unixtimestamp.com/
     
     # Save to file
     if not args.no_save:
-        save_trades_to_parquet(df, args.wallet, args.markets, args.start, args.end)
+        save_trades_to_parquet(df, args.wallet, args.markets, args.start, args.end, OUTPUT_FILENAME)
         print("\nTo load this data later, use:")
         print(f"python polymarket_historical_trades.py --load polymarket_data/trades_*.parquet")
 
