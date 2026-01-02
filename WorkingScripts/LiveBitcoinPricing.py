@@ -30,7 +30,7 @@ subscribe_message = {
   }]
 }
 
-# Watchlist
+# Our watchlist
 MY_WATCHLIST = ["btcusdt"]
 
 async def run_bot():
