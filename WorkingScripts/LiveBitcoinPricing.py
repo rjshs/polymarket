@@ -13,25 +13,17 @@ DATA_DIR.mkdir(exist_ok=True)
 FILENAME = DATA_DIR / "1766692800-prices.parquet"
 
 # Subscription (Chainlink Feed)
-# subscribe_message = {
-#   "action": "subscribe",
-#   "subscriptions": [{
-#     "topic": "crypto_prices_chainlink",
-#     "type": "*",
-#     "filters": "{\"symbol\":\"btc/usd\"}"
-#   }]
-# }
 subscribe_message = {
   "action": "subscribe",
   "subscriptions": [{
-    "topic": "crypto_prices",
-    "type": "update",
-    "filters": "btcusdt,ethusdt"
+    "topic": "crypto_prices_chainlink",
+    "type": "*",
+    "filters": "{\"symbol\":\"btc/usd\"}"
   }]
 }
 
 # Our watchlist
-MY_WATCHLIST = ["btcusdt"]
+MY_WATCHLIST = ["btc/usd"]
 
 async def run_bot():
     # --- BUFFER SETUP ---
