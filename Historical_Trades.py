@@ -14,8 +14,8 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 # DEFAULT SETTINGS - Edit these to run without arguments
 DEFAULT_WALLET = "0x6031b6eed1c97e853c6e0f03ad3ce3529351f96d"  # REQUIRED: Wallet address to track
 DEFAULT_MARKETS = None  # List of market slugs like ["bitcoin-up-or-down-december-21"] or None for all markets
-DEFAULT_START = 1766692800  # Unix timestamp (seconds) for start time or None. Example: 1734775200
-DEFAULT_END = 1766693700  # Unix timestamp (seconds) for end time or None. Example: 1734789600
+DEFAULT_START = 1768842000  # Unix timestamp (seconds) for start time or None. Example: 1734775200
+DEFAULT_END = 1768845600  # Unix timestamp (seconds) for end time or None. Example: 1734789600
 DEFAULT_MAX_PAGES = None  # Maximum pages to fetch or None for unlimited
 DEFAULT_SAVE = True  # Save trades to parquet file
 OUTPUT_FILENAME = "1766692800-trades"  # Custom filename (without .parquet) or None for auto-generated
