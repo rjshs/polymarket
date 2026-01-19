@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional, List
 
 # ============ CONFIGURATION ============
-# Data storage directory
+# Data storage directory (change as needed)
 DATA_DIR = Path("DataCollection/BotTrades")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
