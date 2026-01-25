@@ -42,7 +42,7 @@ def extract_market_slug(market_url):
 
 def get_condition_ids_from_slug(market_slug):
     """
-    Get condition IDs for a market slug using Gamma API.
+    Get condition IDs for a market slug using Gamma API
     Returns list of condition IDs
     """
     print(f"Fetching condition IDs for market slug: {market_slug}")
