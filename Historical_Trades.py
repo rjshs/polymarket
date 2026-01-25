@@ -82,7 +82,7 @@ def fetch_activity_page(
     politeness_delay_s: float = 0.15
 ):
     """
-    Fetch a single page of activity from Polymarket Data API
+    Fetch single page of activity from Polymarket Data API
     
     Args:
         user: Wallet address
