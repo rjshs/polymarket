@@ -103,7 +103,7 @@ def fetch_user_transactions(wallet_address):
 
 def get_current_positions(wallet_address, condition_ids=None, market_filter=None):
     """
-    Get current positions using Polymarket's Data API
+    Get our current positions using Polymarket's Data API
     Optionally filter by specific condition IDs or market criteria
     """
     print(f"Fetching current positions from Polymarket API...")
