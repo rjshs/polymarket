@@ -63,7 +63,7 @@ def get_market_info(market_slug):
                         'slug': market_slug
                     }
             
-            print(f"Found {len(condition_ids)} markets in event: {event_data.get('title')}")
+            print(f"We found {len(condition_ids)} markets in event: {event_data.get('title')}")
             return condition_ids, market_info
         else:
             print(f"Error fetching market info: {response.status_code}")
