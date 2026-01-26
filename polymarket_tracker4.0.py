@@ -302,7 +302,7 @@ def main(wallet_addresses=None, market_urls=None, skip_leaderboard=False, top_vo
          top_profit=False, plot=True, latest_price_mode=False, monitor=False,
          interval=60, save_data=True, load_file=None, active_only=False, future_only=False):
     """
-    Main function to analyze Polymarket user positions
+    The main function to analyze Polymarket user positions
     """
     
     # Handle loading existing data
