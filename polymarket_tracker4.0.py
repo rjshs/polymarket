@@ -106,7 +106,7 @@ def get_current_positions(wallet_address, condition_ids=None, market_filter=None
     Get our current positions using Polymarket's Data API
     Optionally filter by specific condition IDs or market criteria
     """
-    print(f"Fetching curr positions from Polymarket API...")
+    print(f"Fetching curr pos from Polymarket API...")
     
     url = f"https://data-api.polymarket.com/positions"
     params = {
