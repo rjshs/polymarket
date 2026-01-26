@@ -37,7 +37,7 @@ def extract_market_slug(market_url):
 
 def get_market_info(market_slug):
     """
-    Get market information from Polymarket API to find the condition IDs
+    Get market information from Polymarket API to find condition IDs
     """
     print(f"Fetching market info for: {market_slug}")
     
