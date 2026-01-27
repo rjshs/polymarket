@@ -305,7 +305,7 @@ def main(wallet_addresses=None, market_urls=None, skip_leaderboard=False, top_vo
     The main function to analyze Polymarket user positions
     """
     
-    # Handle loading existing data
+    # Handle loading the existing data
     if load_file:
         print(f"Loading data from: {load_file}")
         df = load_position_history(load_file)
