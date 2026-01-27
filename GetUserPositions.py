@@ -177,6 +177,7 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
+    # Main runner
     main(
         wallet_addresses=args.wallets,
         skip_leaderboard=args.skip_leaderboard,
