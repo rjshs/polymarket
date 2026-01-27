@@ -175,6 +175,7 @@ if __name__ == "__main__":
         help='Only retrieve the latest prices, no plotting'
     )
     
+    # Argument parser
     args = parser.parse_args()
     
     # Main runner
