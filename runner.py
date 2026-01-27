@@ -46,7 +46,7 @@ def clean_dataframe():
         df_clean.to_parquet(OUTPUT_FILE, index=False)
         print(f"✅ Clean file saved to:\n   {OUTPUT_FILE}")
         
-        # Verify it really is clean
+        # Verify that it really is clean
         print("\n🔍 Verification Check:")
         sample_slugs = df_clean['slug'].unique()
         print(f"Remaining Market Slugs: {sample_slugs}")
