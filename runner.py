@@ -51,7 +51,7 @@ def clean_dataframe():
         sample_slugs = df_clean['slug'].unique()
         print(f"Remaining Market Slugs: {sample_slugs}")
     else:
-        print("⚠️ No Ethereum rows were found. File was already clean")
+        print("⚠️ No Ethereum rows were found. File was already clean.")
 
 if __name__ == "__main__":
     clean_dataframe()
